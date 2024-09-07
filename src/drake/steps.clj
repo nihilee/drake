@@ -19,7 +19,8 @@
             [slingshot.slingshot :refer [throw+]]
             [drake.utils :as utils :refer [clip reverse-multimap concat-distinct]]
             [drake.options :refer [*options*]]
-            [drake.fs :refer [remove-extra-slashes normalized-path]]))
+            [drake.fs :refer [remove-extra-slashes normalized-path]])
+  (:import [org.jgrapht.graph DirectedAcyclicGraph DefaultEdge]))
 
 (defn step-str
   "Returns a string representation of the step as a comma-separated
@@ -60,37 +61,37 @@
 
         build-variants (fn [variants] (map step-index-map variants))
         output-map-lookup-regexp
-          (apply utils/merge-multimaps-distinct
-                 (build-variants [:raw-outputs
-                                  (map-key remove-extra-slashes :raw-outputs)
-                                  :outputs
-                                  (map-key remove-extra-slashes :outputs)]))
+        (apply utils/merge-multimaps-distinct
+               (build-variants [:raw-outputs
+                                (map-key remove-extra-slashes :raw-outputs)
+                                :outputs
+                                (map-key remove-extra-slashes :outputs)]))
         output-map-lookup (utils/merge-multimaps-distinct output-map-lookup-regexp
                                                           normalized-output-map)
         ;;_ (prn output-map-lookup)
         ]
     (assoc raw-parse-tree
-      :output-map-lookup output-map-lookup
-      :output-map-lookup-regexp output-map-lookup-regexp
-      :output-tags-map output-tags-map
-      :method-map method-map
+           :output-map-lookup output-map-lookup
+           :output-map-lookup-regexp output-map-lookup-regexp
+           :output-tags-map output-tags-map
+           :method-map method-map
       ;; this basically calculates dependencies
       ;; (mapv is used to convert it to vector for indexed lookup in the future)
-      :steps (mapv
-              #(assoc %
-                 :parents (apply
-                           concat-distinct
-                           (concat (map normalized-output-map
-                                        (map normalized-path (:inputs %)))
-                                   (map output-tags-map
-                                        (:input-tags %))))
-                 :children (apply
-                            concat-distinct
-                            (concat (map normalized-input-map
-                                         (map normalized-path (:outputs %)))
-                                    (map input-tags-map
-                                         (:output-tags %)))))
-              steps))))
+           :steps (mapv
+                   #(assoc %
+                           :parents (apply
+                                     concat-distinct
+                                     (concat (map normalized-output-map
+                                                  (map normalized-path (:inputs %)))
+                                             (map output-tags-map
+                                                  (:input-tags %))))
+                           :children (apply
+                                      concat-distinct
+                                      (concat (map normalized-input-map
+                                                   (map normalized-path (:outputs %)))
+                                              (map input-tags-map
+                                                   (:output-tags %)))))
+                   steps))))
 
 ;; No way to get to MAX_PATH from Java
 ;; Leave some characters for unique suffixes and for files inside
@@ -117,8 +118,7 @@
                                                            output-tags))))))
                     steps)
           ;; { "dir1" [0] "dir2" [1 2] }
-          dir-indexed (reverse-multimap (map-indexed vector (map vector dirs)))
-          ]
+          dir-indexed (reverse-multimap (map-indexed vector (map vector dirs)))]
       (reduce (fn [tree [dir steps]]
                 ;; add .0, .1, etc. but only if needed,
                 ;; i.e. more than 1 directory with the same name
@@ -136,9 +136,9 @@
    See process-qualifiers function to see how a target is prepared."
   [parse-tree {:keys [name match-type match-string]}]
   (let [[map-to-use map-to-use-regexp]
-          (match-type {:tag    [:output-tags-map :output-tags-map]
-                       :method [:method-map :method-map]
-                       :output [:output-map-lookup :output-map-lookup-regexp]})
+        (match-type {:tag    [:output-tags-map :output-tags-map]
+                     :method [:method-map :method-map]
+                     :output [:output-map-lookup :output-map-lookup-regexp]})
         dots (= match-string "...")
         regexp-search (= \@ (first match-string))
         everything (and (not regexp-search)
@@ -167,6 +167,44 @@
       targets
       (throw+ {:msg (str "target not found: " name)}))))
 
+;; TODO: do dfs use jgraphT
+(defn- create-graph [tree-steps]
+  (let [graph (DirectedAcyclicGraph. DefaultEdge)]
+    (doseq [index (range (count tree-steps))]
+      (.addVertex graph index))
+    (doseq [[index step] (map-indexed vector tree-steps)
+            child (:children step)]
+      (.addEdge graph index child))
+    graph))
+
+(def momo-create-graph
+  (memoize create-graph))
+
+(defn- expand-step-jgrapht
+  [tree-steps index up-tree valid-step-indices]
+  (let [g (momo-create-graph tree-steps)]
+    (if up-tree
+      (cond
+        (nil? valid-step-indices) (conj
+                                   (into #{} (.getAncestors g index))
+                                   index)
+        (valid-step-indices index) (set/intersection
+                                    valid-step-indices
+                                    (conj
+                                     (into #{} (.getAncestors g index))
+                                     index))
+        :else [])
+      (cond
+        (nil? valid-step-indices) (conj
+                                   (into #{} (.getDescendants g index))
+                                   index)
+        (valid-step-indices index) (set/intersection
+                                    valid-step-indices
+                                    (conj
+                                     (into #{} (.getDescendants g index))
+                                     index))
+        :else []))))
+
 (defn- expand-step-recur
   "The recursive function used in expand-step (see below).
    current-chain is the current set of targets and is used
@@ -191,11 +229,16 @@
                                                  current-chain-and-me)))}))
       (let [all-but-me (mapcat #(expand-step-recur tree-steps %
                                                    up-tree current-chain-and-me valid-step-indices)
-                               (step (if up-tree :parents :children)))]
+                               (step (if up-tree
+                                       :parents
+                                       :children)))]
         ;; conj appends an element to the back of the vector (which
         ;; is what we need for up-tree mode), but to the beginning
         ;; of the sequence (which is what we need for down-tree)
-        (conj (if up-tree (into [] all-but-me) all-but-me) index)))
+        (conj (if up-tree
+                (into [] all-but-me)
+                all-but-me)
+              index)))
     []))
 
 (defn expand-step-restricted
@@ -205,10 +248,10 @@
   ;;(prn (parse-tree :steps))
   (if (= tree-mode :only)
     [index]
-    (expand-step-recur (:steps parse-tree) index (nil? tree-mode) [] valid-step-indices)))
+    (expand-step-jgrapht (:steps parse-tree) index (nil? tree-mode) valid-step-indices)))
 
 (defn expand-step
-   "Given a step index, return an ordered list of all steps involved
+  "Given a step index, return an ordered list of all steps involved
    into building the given step.
 
    Tree mode can be either :down, :only or nil for default (up-tree)."
@@ -245,15 +288,15 @@
   (map #(let [[clipped-name build-mode] (clip-only % #{\+ \-})
               [clipped-name tree-mode]  (clip-only clipped-name #{\^ \=})
               [match-type match-string]
-                (cond
-                  (= \% (first clipped-name))
-                    [:tag (clip clipped-name)]
-                  (= "()" (subs clipped-name
-                                (max 0 (- (count clipped-name) 2))))
-                    [:method (subs clipped-name 0
-                                   (- (count clipped-name) 2))]
-                  :else
-                    [:output clipped-name])]
+              (cond
+                (= \% (first clipped-name))
+                [:tag (clip clipped-name)]
+                (= "()" (subs clipped-name
+                              (max 0 (- (count clipped-name) 2))))
+                [:method (subs clipped-name 0
+                               (- (count clipped-name) 2))]
+                :else
+                [:output clipped-name])]
           {:name  clipped-name
            :build ({\+ :forced \- :exclude} build-mode)
            :tree  ({\= :only \^ :down} tree-mode)
@@ -347,8 +390,8 @@
         (let [dependencies (all-dependencies parse-tree index)
               ;; dependencies of the current step already specified
               used-dependencies (set/intersection
-                                   dependencies
-                                   (into #{} (keys current-steps-map)))
+                                 dependencies
+                                 (into #{} (keys current-steps-map)))
               ;; find the very first step which is a dependency (by :pos)
               ;; and set the position of the new step to be just slightly less
               insert-position (if (empty? used-dependencies)
@@ -385,8 +428,8 @@
     (utils/in-ms debug "Selecting steps")
     (let [steps (expand-targets parse-tree
                                 (match-target-steps
-                                  parse-tree
-                                  (process-qualifiers target-names)))]
+                                 parse-tree
+                                 (process-qualifiers target-names)))]
       (check-output-conflicts
        parse-tree
        (sort-by :pos

@@ -1,4 +1,4 @@
-(defproject factual/drake "1.0.3"
+(defproject factual/drake "1.0.4"
   :description "Drake: the data processing workflow tool (a.k.a. 'make for data')"
   :url "https://github.com/Factual/drake"
   :license {:name "Eclipse Public License"
@@ -28,6 +28,7 @@
                  [hdfs-clj "0.1.3"]    ;; for HDFS support
                  [org.apache.hadoop/hadoop-core "0.20.2"]
                  [clj-aws-s3 "0.3.10" :exclusions [joda-time]]    ;; for AWS S3 support
+                 [org.jgrapht/jgrapht-core "1.4.0"]
                  ;; for plugins
                  [com.cemerick/pomegranate "0.2.0" :exclusions [org.apache.httpcomponents/httpcore]]]
   :test-selectors {:regression   :regression

@@ -7,3 +7,7 @@ pom.xml
 .classpath
 .project
 drake.log
+.calva/
+.clj-kondo/
+.lsp/
+demos/clj-frontend/.calva/
