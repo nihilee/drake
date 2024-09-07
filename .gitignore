@@ -11,3 +11,4 @@ drake.log
 .clj-kondo/
 .lsp/
 demos/clj-frontend/.calva/
+.vscode/

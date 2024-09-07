@@ -9,11 +9,10 @@
             [drake.event] ;; to make sure its deftypes are loaded
             [name.choi.joshua.fnparse :as p]
             [slingshot.slingshot :refer [throw+]]
-            [clojure.pprint :refer [pprint]]
-            [clj-time.coerce :as coerce-time]
-            [clj-time.local :as local-time])
+            [clojure.pprint :refer [pprint]])
   (:import [com.google.common.eventbus EventBus Subscribe]
-           [drake.event DrakeEvent]))
+           [java.time Instant LocalDateTime ZoneId]
+           [java.time.format DateTimeFormatter]))
 
 (defn tprn
   "Transparent prn"
@@ -96,19 +95,19 @@
   characters and #{XXX} placeholders.  To check that the var-names
   exist, pass in a vars map."
   ([s]
-     (var-place false s))
+   (var-place false s))
   ([vars s]
-     (if-let [raw-matches (re-seq var-split-re s)]
-       (let [var-matches (map (comp vec (partial drop 1)) raw-matches)
-             var-names (map second var-matches)
-             with-placeholders (map
-                                #(update-in % [1] hash-set)
-                                var-matches)]
-         (when vars (dorun (map (partial var-check vars) var-names)))
-         (flatten
-          (map #(if (string? %) (vec %) %)
-               (flatten with-placeholders))))
-       (concat s))))
+   (if-let [raw-matches (re-seq var-split-re s)]
+     (let [var-matches (map (comp vec (partial drop 1)) raw-matches)
+           var-names (map second var-matches)
+           with-placeholders (map
+                              #(update-in % [1] hash-set)
+                              var-matches)]
+       (when vars (dorun (map (partial var-check vars) var-names)))
+       (flatten
+        (map #(if (string? %) (vec %) %)
+             (flatten with-placeholders))))
+     (concat s))))
 
 (defn add-placeholder-vars
   [vars infiles outfiles]
@@ -131,8 +130,8 @@
   "Revove % from start of tags"
   [tags]
   (let [%-remover (fn [t] (if (#{\%} (first t))
-                              (d-utils/clip t)
-                              t))]
+                            (d-utils/clip t)
+                            t))]
     (map %-remover tags)))
 
 (defn split-tags-from-files
@@ -150,26 +149,26 @@
         commands (:cmds step-map)
         state nil]
     (cond
-     (not (or (empty? step-method) (methods step-method)))
-     (throw-parse-error state "method '%s' undefined at this point."
-                        step-method)
+      (not (or (empty? step-method) (methods step-method)))
+      (throw-parse-error state "method '%s' undefined at this point."
+                         step-method)
 
-     (not (or (empty? method-mode) (#{"use" "append" "replace"} method-mode)))
-     (throw-parse-error state
-                        (str "%s is not a valid method-mode, valid values are: "
-                             "use (default), append, and replace.")
-                        method-mode)
+      (not (or (empty? method-mode) (#{"use" "append" "replace"} method-mode)))
+      (throw-parse-error state
+                         (str "%s is not a valid method-mode, valid values are: "
+                              "use (default), append, and replace.")
+                         method-mode)
 
-     (not (or step-method (empty? method-mode)))
-     (throw-parse-error state
-                        "method-mode specified but method name not given")
+      (not (or step-method (empty? method-mode)))
+      (throw-parse-error state
+                         "method-mode specified but method name not given")
 
-     (and step-method (not (#{"append" "replace"} method-mode))
-          (not (empty? commands)))
-     (throw-parse-error state
-                        (str "commands not allowed for method calls "
-                             "(use method-mode:append or method-mode:replace "
-                             "to allow)")))))
+      (and step-method (not (#{"append" "replace"} method-mode))
+           (not (empty? commands)))
+      (throw-parse-error state
+                         (str "commands not allowed for method calls "
+                              "(use method-mode:append or method-mode:replace "
+                              "to allow)")))))
 (defn add-step-ids
   "Add Unique ID to each step in parse-tree"
   [parse-tree]
@@ -194,10 +193,10 @@
   "Take a string s and makes a raw parse-tree."
   [s]
   (let [state (make-state
-                      (d-utils/ensure-final-newline s)
-                      {}
-                      #{}
-                      1 1)]
+               (d-utils/ensure-final-newline s)
+               {}
+               #{}
+               1 1)]
     (p/rule-match parse/workflow
                   #((illegal-syntax-error-fn "start of workflow")
                     (:remainder %2) %2) ;; fail
@@ -223,11 +222,10 @@
 (defn event-time
   "Take the event-map and return a human readable time"
   [event-map]
-  (let [timestamp (coerce-time/from-long
-                   (:timestamp event-map))]
-    (local-time/format-local-time
-     (local-time/to-local-date-time timestamp)
-     :hour-minute-second)))
+  (let [timestamp (Instant/ofEpochMilli (:timestamp event-map))
+        local-dt  (LocalDateTime/ofInstant timestamp (ZoneId/systemDefault))
+        formatter (DateTimeFormatter/ofPattern "HH:mm:ss")]
+    (.format local-dt formatter)))
 
 (defn step-string
   "Take the event-map and return a short display string for the event"
@@ -279,8 +277,8 @@
 (deftype DrakeEventHandler []
   IDrakeEvent
   (^{Subscribe true}
-   handleDrakeEvent [_ event]
-   (handle-drake-event event)))
+    handleDrakeEvent [_ event]
+    (handle-drake-event event)))
 
 (defn start-event-bus
   "Return an EventBus instance with a handler registered for events of

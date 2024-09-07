@@ -1,8 +1,8 @@
 (ns drake.utils
-  (:require [jlk.time.core :as time]
-            [clojure.string :as str]
-            [fs.core :as fs])
-  (:require [ordered.set :as ordered]))
+  (:require [fs.core :as fs]
+            [ordered.set :as ordered])
+  (:import [java.time ZonedDateTime]
+           [java.time.format DateTimeFormatter]))
 
 ;; TODO(artem)
 ;; The several functions below in between + lines are not Drake-specific and
@@ -55,7 +55,9 @@
 (defn now-filename
   "Returns a filename representing current local time with second resolution."
   []
-  (time/convert (time/now) (time/formatter "YYYY-MM-dd_HH.mm.ss_Z")))
+  (let [formatter (DateTimeFormatter/ofPattern "yyyy-MM-dd_HH.mm.ss_Z")
+        current-time (ZonedDateTime/now)]
+    (.format current-time formatter)))
 
 (def start-time-filename (now-filename))
 
